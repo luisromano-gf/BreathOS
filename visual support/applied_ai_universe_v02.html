@@ -1,0 +1,302 @@
+
+<style>
+  #cosmos { width: 100%; height: 780px; position: relative; overflow: hidden; }
+  #cosmos canvas { position: absolute; top: 0; left: 0; }
+  #cosmos svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+  .node-label { font-size: 11px; font-weight: 500; fill: var(--color-text-primary); pointer-events: none; }
+  .node-sublabel { font-size: 9px; fill: var(--color-text-secondary); pointer-events: none; }
+  .cluster-label { font-size: 13px; font-weight: 500; fill: var(--color-text-secondary); pointer-events: none; opacity: 0.7; }
+  .link { stroke-opacity: 0.18; fill: none; }
+  circle.node { cursor: pointer; stroke-width: 0.5; transition: stroke-opacity 0.2s; }
+  circle.node:hover { stroke-opacity: 1 !important; }
+  #legend { position: absolute; bottom: 12px; left: 12px; display: flex; flex-wrap: wrap; gap: 8px; max-width: 320px; }
+  .leg { display: flex; align-items: center; gap: 4px; font-size: 10px; color: var(--color-text-secondary); }
+  .leg-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  #tooltip { position: absolute; pointer-events: none; background: var(--color-background-primary); border: 0.5px solid var(--color-border-secondary); border-radius: 8px; padding: 8px 12px; font-size: 12px; color: var(--color-text-primary); max-width: 200px; opacity: 0; transition: opacity 0.15s; z-index: 10; }
+  #tooltip strong { display: block; font-size: 13px; margin-bottom: 2px; }
+  #controls { position: absolute; top: 10px; right: 10px; display: flex; gap: 6px; }
+  #controls button { font-size: 11px; padding: 4px 10px; }
+</style>
+
+<div id="cosmos">
+  <svg id="graph-svg"></svg>
+  <div id="tooltip"></div>
+  <div id="legend"></div>
+  <div id="controls">
+    <button onclick="resetSim()">Reset</button>
+    <button onclick="sendPrompt('Save the project plan — generate the full markdown document for the repo')">Save plan ↗</button>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<script>
+const CLUSTERS = [
+  { id: 'arch',      label: 'Architectures',     color: '#7F77DD', nodes: [
+    { id: 'transformer', label: 'Transformer',    sub: 'Dominant. Quadratic.',  r: 14 },
+    { id: 'ssm',         label: 'SSM / Mamba',    sub: 'Linear scale.',         r: 11 },
+    { id: 'hybrid',      label: 'Hybrid',         sub: 'Attn + SSM',            r: 10 },
+    { id: 'diffusion',   label: 'Diffusion',      sub: 'Gen. media',            r: 12 },
+    { id: 'moe',         label: 'MoE',            sub: 'Sparse experts',        r: 11 },
+    { id: 'rl',          label: 'RL / RLHF',      sub: 'Alignment training',    r: 9  },
+  ]},
+  { id: 'models',    label: 'Model families',    color: '#378ADD', nodes: [
+    { id: 'gpt',         label: 'GPT-5 / o3',     sub: 'OpenAI',               r: 13 },
+    { id: 'claude',      label: 'Claude 4.x',     sub: 'Anthropic',            r: 13 },
+    { id: 'gemini',      label: 'Gemini 2.x',     sub: 'Google',               r: 12 },
+    { id: 'llama',       label: 'Llama 4',        sub: 'Meta · open',          r: 12 },
+    { id: 'deepseek',    label: 'DeepSeek V3',    sub: 'China · open',         r: 11 },
+    { id: 'mistral',     label: 'Mistral',        sub: 'EU · fast',            r: 9  },
+    { id: 'qwen',        label: 'Qwen 3.5',       sub: 'Alibaba · open',       r: 9  },
+    { id: 'phi',         label: 'Phi-4 / Gemma',  sub: 'Small + capable',      r: 8  },
+  ]},
+  { id: 'intel',     label: 'Intelligence + Agency', color: '#EF9F27', nodes: [
+    { id: 'emergence',   label: 'Emergence',      sub: 'Unpredicted abilities', r: 13 },
+    { id: 'reasoning',   label: 'Reasoning',      sub: 'Chain-of-thought',      r: 12 },
+    { id: 'agency',      label: 'Agency',         sub: 'Goal-directed action',  r: 13 },
+    { id: 'planning',    label: 'Planning',       sub: 'Multi-step foresight',  r: 10 },
+    { id: 'tool_use',    label: 'Tool use',       sub: 'API, code, search',     r: 10 },
+    { id: 'selfimprove', label: 'Self-improvement',sub: 'Recursive growth',     r: 9  },
+  ]},
+  { id: 'memory',    label: 'Memory + Context',  color: '#1D9E75', nodes: [
+    { id: 'ctx_window',  label: 'Context window', sub: 'Token limit',           r: 12 },
+    { id: 'rag',         label: 'RAG',            sub: 'Retrieval-augmented',   r: 13 },
+    { id: 'vector_db',   label: 'Vector DB',      sub: 'Chroma, Qdrant',        r: 10 },
+    { id: 'episodic',    label: 'Episodic mem.',  sub: 'Past interactions',     r: 9  },
+    { id: 'longctx',     label: 'Long context',   sub: '1M+ tokens',            r: 10 },
+    { id: 'kvcache',     label: 'KV cache',       sub: 'Speed + compression',   r: 8  },
+    { id: 'finetune',    label: 'Fine-tuning',    sub: 'Domain memory',         r: 10 },
+  ]},
+  { id: 'modality',  label: 'Modalities',        color: '#D4537E', nodes: [
+    { id: 'text',        label: 'Text / LLM',     sub: 'Core capability',       r: 11 },
+    { id: 'image',       label: 'Image',          sub: 'Gen + understand',      r: 10 },
+    { id: 'audio',       label: 'Audio',          sub: 'TTS, STT, music',       r: 9  },
+    { id: 'video',       label: 'Video',          sub: 'Sora-class gen.',       r: 9  },
+    { id: 'code',        label: 'Code',           sub: 'Dev assistant',         r: 10 },
+    { id: 'multimodal',  label: 'Multimodal',     sub: 'Any → any',             r: 12 },
+  ]},
+  { id: 'deploy',    label: 'Deployment',        color: '#BA7517', nodes: [
+    { id: 'local',       label: 'Local inference',sub: 'Ollama, llama.cpp',     r: 12 },
+    { id: 'cloud',       label: 'Cloud API',      sub: 'OpenAI, Anthropic',     r: 11 },
+    { id: 'agents_d',    label: 'Agents',         sub: 'Autonomous exec',       r: 12 },
+    { id: 'orchestr',    label: 'Orchestration',  sub: 'LangChain, n8n, MCP',   r: 10 },
+    { id: 'edge',        label: 'Edge / IoT',     sub: 'On-device',             r: 8  },
+    { id: 'multiagent',  label: 'Multi-agent',    sub: 'Swarms, crews',         r: 10 },
+  ]},
+  { id: 'hardware',  label: 'Hardware + Net',    color: '#639922', nodes: [
+    { id: 'gpu',         label: 'GPU (CUDA)',     sub: 'NVIDIA dominance',      r: 12 },
+    { id: 'quant',       label: 'Quantization',  sub: '4-bit, GGUF, AWQ',      r: 10 },
+    { id: 'tpu',         label: 'TPU / NPU',     sub: 'Google, Apple, etc',    r: 9  },
+    { id: 'distributed', label: 'Distributed',   sub: 'Multi-node, NCCL',      r: 10 },
+    { id: 'net',         label: 'Network AI',    sub: 'Multi-device mesh',     r: 11 },
+    { id: 'personal_hw', label: '2x3090',        sub: 'Your server',           r: 9  },
+  ]},
+  { id: 'impact',    label: 'Impact zones',      color: '#E24B4A', nodes: [
+    { id: 'science',     label: 'Science',        sub: 'Drug discovery',        r: 10 },
+    { id: 'labor',       label: 'Labor shift',    sub: 'Automation risk',       r: 11 },
+    { id: 'augment',     label: 'Augmentation',   sub: 'Human + AI',            r: 12 },
+    { id: 'safety',      label: 'AI safety',      sub: 'Alignment, risk',       r: 10 },
+    { id: 'sovereign',   label: 'Sovereignty',    sub: 'Geopolitics',           r: 9  },
+    { id: 'governance',  label: 'Governance',     sub: 'Law, ethics, policy',   r: 9  },
+  ]},
+];
+
+const CROSS_LINKS = [
+  ['transformer','moe'],['transformer','reasoning'],['transformer','ctx_window'],
+  ['ssm','longctx'],['hybrid','transformer'],['hybrid','ssm'],
+  ['diffusion','image'],['diffusion','video'],['diffusion','audio'],
+  ['rag','vector_db'],['rag','ctx_window'],['rag','local'],
+  ['agency','planning'],['agency','tool_use'],['agency','multiagent'],
+  ['emergence','reasoning'],['emergence','agency'],
+  ['finetune','local'],['finetune','memory'],
+  ['local','gpu'],['local','quant'],['local','personal_hw'],
+  ['net','distributed'],['net','multiagent'],
+  ['agents_d','tool_use'],['agents_d','orchestr'],['agents_d','multiagent'],
+  ['augment','agency'],['augment','labor'],
+  ['reasoning','planning'],['reasoning','rag'],
+  ['multimodal','text'],['multimodal','image'],['multimodal','audio'],
+  ['cloud','gpt'],['cloud','claude'],['cloud','gemini'],
+  ['llama','local'],['deepseek','local'],['qwen','local'],
+  ['selfimprove','agency'],['selfimprove','reasoning'],
+  ['kvcache','ctx_window'],['longctx','ctx_window'],
+  ['episodic','rag'],['episodic','agents_d'],
+];
+
+const W = () => document.getElementById('cosmos').clientWidth;
+const H = 780;
+
+let allNodes = [];
+let allLinks = [];
+let simulation, svg, linkSel, nodeSel, labelSel;
+
+function init() {
+  const width = W();
+  const clusterCenters = [];
+  const nc = CLUSTERS.length;
+  CLUSTERS.forEach((c, i) => {
+    const angle = (i / nc) * 2 * Math.PI - Math.PI / 2;
+    const rx = width * 0.30, ry = H * 0.30;
+    clusterCenters.push({
+      x: width / 2 + rx * Math.cos(angle),
+      y: H / 2 + ry * Math.sin(angle),
+    });
+  });
+
+  allNodes = [];
+  CLUSTERS.forEach((c, ci) => {
+    const cx = clusterCenters[ci].x, cy = clusterCenters[ci].y;
+    c.nodes.forEach((n, ni) => {
+      const a = (ni / c.nodes.length) * 2 * Math.PI;
+      allNodes.push({
+        ...n,
+        cluster: c.id,
+        color: c.color,
+        x: cx + 40 * Math.cos(a) + (Math.random() - 0.5) * 20,
+        y: cy + 40 * Math.sin(a) + (Math.random() - 0.5) * 20,
+        cx: cx, cy: cy,
+      });
+    });
+    allNodes.push({
+      id: '__center_' + c.id,
+      label: c.label,
+      sub: '',
+      r: 5,
+      cluster: c.id,
+      color: c.color,
+      isCenter: true,
+      x: cx, y: cy, cx, cy,
+    });
+  });
+
+  const nodeMap = {};
+  allNodes.forEach(n => nodeMap[n.id] = n);
+
+  allLinks = [];
+  CLUSTERS.forEach(c => {
+    const centerId = '__center_' + c.id;
+    c.nodes.forEach(n => {
+      allLinks.push({ source: centerId, target: n.id, type: 'cluster', color: c.color });
+    });
+  });
+  CROSS_LINKS.forEach(([a, b]) => {
+    if (nodeMap[a] && nodeMap[b]) {
+      allLinks.push({ source: a, target: b, type: 'cross', color: '#888' });
+    }
+  });
+
+  svg = d3.select('#graph-svg')
+    .attr('width', width).attr('height', H);
+  svg.selectAll('*').remove();
+
+  linkSel = svg.append('g').selectAll('line')
+    .data(allLinks).join('line')
+    .attr('class', 'link')
+    .attr('stroke', d => d.color)
+    .attr('stroke-width', d => d.type === 'cluster' ? 1.2 : 0.6)
+    .attr('stroke-opacity', d => d.type === 'cluster' ? 0.25 : 0.1);
+
+  nodeSel = svg.append('g').selectAll('circle')
+    .data(allNodes).join('circle')
+    .attr('class', 'node')
+    .attr('r', d => d.r)
+    .attr('fill', d => d.color + (d.isCenter ? '22' : '33'))
+    .attr('stroke', d => d.color)
+    .attr('stroke-opacity', d => d.isCenter ? 0.9 : 0.6)
+    .attr('stroke-width', d => d.isCenter ? 1.5 : 0.5)
+    .on('mouseover', showTip)
+    .on('mousemove', moveTip)
+    .on('mouseout', hideTip)
+    .on('click', (e, d) => {
+      if (!d.isCenter) sendPrompt('Deep dive: ' + d.label + ' — ' + d.sub);
+    })
+    .call(d3.drag()
+      .on('start', dragStart)
+      .on('drag', dragged)
+      .on('end', dragEnd));
+
+  labelSel = svg.append('g').selectAll('text')
+    .data(allNodes).join('text')
+    .attr('class', d => d.isCenter ? 'cluster-label' : 'node-label')
+    .attr('text-anchor', 'middle')
+    .attr('dy', d => d.r + 11)
+    .text(d => d.isCenter ? d.label : d.label)
+    .style('display', d => d.isCenter ? 'block' : 'block');
+
+  simulation = d3.forceSimulation(allNodes)
+    .force('link', d3.forceLink(allLinks).id(d => d.id).distance(d => d.type === 'cluster' ? 55 : 130).strength(d => d.type === 'cluster' ? 0.6 : 0.05))
+    .force('charge', d3.forceManyBody().strength(d => d.isCenter ? -180 : -60))
+    .force('center', d3.forceCenter(width / 2, H / 2).strength(0.02))
+    .force('collision', d3.forceCollide().radius(d => d.r + 14))
+    .force('cluster', alpha => {
+      allNodes.forEach(n => {
+        if (!n.isCenter) {
+          n.vx += (n.cx - n.x) * alpha * 0.04;
+          n.vy += (n.cy - n.y) * alpha * 0.04;
+        }
+      });
+    })
+    .on('tick', ticked);
+}
+
+function ticked() {
+  const width = W();
+  linkSel
+    .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+    .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+  nodeSel
+    .attr('cx', d => d.x = Math.max(d.r, Math.min(width - d.r, d.x)))
+    .attr('cy', d => d.y = Math.max(d.r, Math.min(H - d.r, d.y)));
+  labelSel
+    .attr('x', d => d.x)
+    .attr('y', d => d.y);
+}
+
+function dragStart(e, d) {
+  if (!e.active) simulation.alphaTarget(0.3).restart();
+  d.fx = d.x; d.fy = d.y;
+}
+function dragged(e, d) { d.fx = e.x; d.fy = e.y; }
+function dragEnd(e, d) {
+  if (!e.active) simulation.alphaTarget(0);
+  d.fx = null; d.fy = null;
+}
+
+function showTip(e, d) {
+  if (d.isCenter) return;
+  const t = document.getElementById('tooltip');
+  t.innerHTML = '<strong>' + d.label + '</strong>' + d.sub;
+  t.style.opacity = '1';
+}
+function moveTip(e) {
+  const t = document.getElementById('tooltip');
+  const box = document.getElementById('cosmos').getBoundingClientRect();
+  let x = e.clientX - box.left + 12, y = e.clientY - box.top - 10;
+  if (x + 210 > W()) x -= 220;
+  t.style.left = x + 'px'; t.style.top = y + 'px';
+}
+function hideTip() { document.getElementById('tooltip').style.opacity = '0'; }
+
+function resetSim() {
+  CLUSTERS.forEach((c, ci) => {
+    const nc = CLUSTERS.length;
+    const angle = (ci / nc) * 2 * Math.PI - Math.PI / 2;
+    const width = W();
+    const rx = width * 0.30, ry = H * 0.30;
+    const cx = width / 2 + rx * Math.cos(angle);
+    const cy = H / 2 + ry * Math.sin(angle);
+    allNodes.filter(n => n.cluster === c.id).forEach(n => {
+      n.cx = cx; n.cy = cy;
+    });
+  });
+  simulation.alpha(0.8).restart();
+}
+
+function buildLegend() {
+  const leg = document.getElementById('legend');
+  leg.innerHTML = CLUSTERS.map(c =>
+    `<div class="leg"><div class="leg-dot" style="background:${c.color}"></div>${c.label}</div>`
+  ).join('');
+}
+
+init();
+buildLegend();
+</script>
