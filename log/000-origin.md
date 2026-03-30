@@ -8,7 +8,8 @@
 
 ## What happened
 
-BreathOS was born in a conversation. Not designed top-down. Emerged through dialogue between a human navigator and an AI (Claude, Anthropic Sonnet 4.6).
+BreathOS was born in this conversation https://claude.ai/share/1c31793f-4dd2-4975-91ef-a22ab768bb70
+Not designed top-down. Emerged through dialogue between a human navigator and an AI (Claude, Anthropic Sonnet 4.6).
 
 The conversation started as a structured project brief about applied AI research. It became something else: a genuine exploration of how a human mind stays oriented, decisive, and effective inside an exponentially expanding knowledge space.
 
